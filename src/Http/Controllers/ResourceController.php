@@ -1,6 +1,6 @@
 <?php
 
-namespace Benjacho\BelongsToManyField\Http\Controllers;
+namespace Sprii\BelongsToManyField\Http\Controllers;
 
 use Laravel\Nova\Fields\Field;
 use Laravel\Nova\Http\Requests\NovaRequest;
@@ -22,7 +22,6 @@ class ResourceController
         if ($dependsOnValue) {
             $queryResult = $queryResult->where($dependsOnKey, $dependsOnValue);
         }
-
         return $queryResult->get()
             ->mapInto($field->resourceClass)
             ->filter(function ($resource) use ($request, $field) {
@@ -34,7 +33,48 @@ class ResourceController
                     'value' => $resource->getKey(),
                 ];
             })
-            ->sortBy($optionsLabel)
+            ->values();
+    }
+
+    public function combined(NovaRequest $request, $parent, $relationship, $optionsLabel, $dependsOnValue = null, $dependsOnKey = null, $dependsOnGroupRelationship = null)
+    {
+        $resourceClass = $request->newResource();
+        $field = $resourceClass
+            ->availableFields($request)
+            ->where('component', 'BelongsToManyField')
+            ->where('attribute', $relationship)
+            ->first();
+        $query = $field->resourceClass::newModel();
+
+        $queryResult = $field->resourceClass::relatableQuery($request, $query);
+
+        if ($dependsOnValue) {
+            $queryResult = $queryResult->whereIn($dependsOnKey, explode(",", $dependsOnValue));
+        }
+
+        // Option group mapping
+        $groupField = $resourceClass
+            ->availableFields($request)
+            ->where('component', 'BelongsToManyField')
+            ->where('attribute', $dependsOnGroupRelationship)
+            ->first();
+        $groupQuery = $groupField->resourceClass::newModel();
+        $groupMap = $groupQuery::whereIn('id', explode(",", $dependsOnValue))
+            ->get()
+            ->pluck('name', $groupQuery->getKeyName());
+
+        return $queryResult->get()
+            ->mapInto($field->resourceClass)
+            ->filter(function ($resource) use ($request, $field) {
+                return $request->newResource()->authorizedToAttach($request, $resource->resource);
+            })->map(function ($resource) use ($optionsLabel, $groupMap, $dependsOnKey) {
+                return [
+                    'id' => $resource->id,
+                    $optionsLabel => $resource->title(),
+                    'value' => $resource->getKey(),
+                    'group' => $groupMap[$resource->{$dependsOnKey}],
+                ];
+            })
             ->values();
     }
 }
